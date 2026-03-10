@@ -1,0 +1,2 @@
+# quip
+`quip` ("quantized CLIP" or "qdrant clip") is a family of embeddings models that natively support quantization. The models are trained to produce int8 and binary embeddings that can be directly used with vector databases like Qdrant, without the need for additional quantization steps. This allows for efficient storage and fast retrieval of embeddings while maintaining high performance.
