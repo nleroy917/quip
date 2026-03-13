@@ -128,3 +128,6 @@ dmypy.json
 *.swp
 *.swo
 *~
+
+quip-flickr-run/
+.DS_Store

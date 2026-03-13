@@ -4,18 +4,21 @@ Quick training run: fine-tune Quip on a 1k-image subset of Flickr30k.
 Usage:
     python train_flickr.py
 
-Requires: pip install datasets
+Requires: pip install datasets comet_ml
 """
-import random
-
+import comet_ml
 import torch
 import torch.nn.functional as F
 
 from datasets import load_dataset
+from dotenv import load_dotenv
 from transformers import AutoProcessor
 from transformers.image_utils import load_image
 
-from quip import QuipModel, QuipTrainer, QuipTrainingArguments
+from quip import QuipModel, QuipTrainer, QuipTrainingArguments, QuipImageTextDataset
+
+load_dotenv()
+comet_ml.login(project_name="quip")
 
 def sanity_check_eval(model: QuipModel, processor: AutoProcessor):
     url = "http://images.cocodataset.org/val2017/000000039769.jpg"
@@ -35,7 +38,7 @@ def sanity_check_eval(model: QuipModel, processor: AutoProcessor):
         print(f"  {t}: {sims[0, i]:.4f}")
 
 CLIP_MODEL = "openai/clip-vit-base-patch32"
-NUM_IMAGES = 1000
+NUM_IMAGES = 10000
 SEED = 42
 OUTPUT_DIR = "./quip-flickr-run"
 
@@ -60,36 +63,8 @@ ds = ds.shuffle(seed=SEED).select(range(min(NUM_IMAGES, len(ds))))
 print(f"Dataset: {len(ds)} images")
 print(f"Sample captions: {ds[0]['caption'][:2]}")
 
-class QuipFlickrDataset(torch.utils.data.Dataset):
-    """
-    Wraps a HF dataset of (image, caption list) pairs for contrastive training.
 
-    Each __getitem__ picks one random caption per image and returns
-    processor-ready tensors.
-    """
-    def __init__(self, hf_dataset, processor):
-        self.dataset = hf_dataset
-        self.processor = processor
-    def __len__(self):
-        return len(self.dataset)
-    def __getitem__(self, idx):
-        row = self.dataset[idx]
-        image = row["image"]
-        # pick one random caption from the 5 available
-        caption = random.choice(row["caption"])
-        encoded = self.processor(
-            text=caption,
-            images=image,
-            return_tensors="pt",
-            padding="max_length",
-            truncation=True,
-            max_length=77,
-        )
-        # Squeeze batch dim (processor returns [1, ...])
-        return {k: v.squeeze(0) for k, v in encoded.items()}
-
-
-train_dataset = QuipFlickrDataset(ds, processor)
+train_dataset = QuipImageTextDataset.from_flickr30k(ds, processor)
 training_args = QuipTrainingArguments(
     output_dir=OUTPUT_DIR,
     num_train_epochs=5,
@@ -102,10 +77,11 @@ training_args = QuipTrainingArguments(
     save_strategy="epoch",
     remove_unused_columns=False,  # we pass custom dict keys
     dataloader_num_workers=4,
-    report_to="none",
+    report_to=["comet_ml"],
     seed=SEED,
-    # Quip-specific: warm up quant heads for 50 steps with frozen backbone
+    # quip-specific: warm up quant heads for 50 steps with frozen backbone
     freeze_backbone_steps=50,
+
 )
 
 model = model.train()  # set to train mode before creating trainer to ensure correct weight tying behavior
