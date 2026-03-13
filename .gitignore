@@ -130,4 +130,5 @@ dmypy.json
 *~
 
 quip-flickr-run/
+quip-coco-run/
 .DS_Store

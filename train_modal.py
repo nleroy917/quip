@@ -64,7 +64,7 @@ def download_data():
 # actual training function, which mounts the volume with the cached dataset and the output volume for checkpoints, and trains the model
 @app.function(
     image=image,
-    gpu="A100",
+    gpu="A10",
     volumes={DATA_DIR: data_volume, OUTPUT_DIR: output_volume},
     timeout=7200, # 2 hours should be enough for a few epochs, and we can always increase if needed
     secrets=[modal.Secret.from_name("comet-api-key")],
@@ -81,6 +81,8 @@ def train():
 
     import comet_ml
     comet_ml.login(project_name="quip")
+    experiment = comet_ml.start(project_name="quip")
+    run_name = experiment.get_name()
 
     from datasets import load_dataset
     from transformers import AutoProcessor
@@ -112,16 +114,17 @@ def train():
     print(f"Training on {len(train_dataset)} images, validating on {len(eval_dataset)} images")
 
     training_args = QuipTrainingArguments(
-        output_dir=os.path.join(OUTPUT_DIR, "quip-coco-run"),
+        output_dir=os.path.join(OUTPUT_DIR, "quip-coco-run", run_name),
+        run_name=run_name,
         num_train_epochs=3,
-        per_device_train_batch_size=128,
+        per_device_train_batch_size=1024,
         learning_rate=2e-4,
         lr_scheduler_type="cosine",
         warmup_ratio=0.05,
         # fp16=True,
         logging_steps=50,
         eval_strategy="steps",
-        eval_steps=500,
+        eval_steps=50,
         save_strategy="epoch",
         remove_unused_columns=False,
         dataloader_num_workers=4,
@@ -144,4 +147,4 @@ def train():
 
     # Flush checkpoints to volume
     output_volume.commit()
-    print(f"Checkpoints saved to {OUTPUT_DIR}/quip-coco-run")
+    print(f"Checkpoints saved to {OUTPUT_DIR}/quip-coco-run/{run_name}")
