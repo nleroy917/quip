@@ -117,7 +117,7 @@ def train():
         output_dir=os.path.join(OUTPUT_DIR, "quip-coco-run", run_name),
         run_name=run_name,
         num_train_epochs=3,
-        per_device_train_batch_size=1024,
+        per_device_train_batch_size=2048, # clip does better with larger batch sizes
         learning_rate=2e-4,
         lr_scheduler_type="cosine",
         warmup_ratio=0.05,

@@ -71,6 +71,54 @@ class CLIPEmbedder(MultimodalEmbedder):
         return torch.cat(all_embeds, dim=0)
 
 
+class CLIPQuantizedEmbedder(MultimodalEmbedder):
+    """
+    Vanilla CLIP with post-hoc int8 quantization — the naive baseline.
+
+    Takes CLIP's L2-normalized float embeddings, scales to [-127, 127], and
+    rounds. This is the "just quantize after the fact" approach that Quip
+    should beat.
+    """
+
+    def __init__(self, model_name: str, device: str = "cpu"):
+        self.model = CLIPModel.from_pretrained(model_name).to(device).eval()
+        self.processor = AutoProcessor.from_pretrained(model_name)
+        self.device = device
+        self.name = f"CLIP-int8({model_name.split('/')[-1]})"
+
+    @staticmethod
+    def _quantize_int8(embeds: torch.Tensor, scale: int = 127) -> torch.Tensor:
+        """Post-hoc int8: normalize, scale, round."""
+        normed = F.normalize(embeds.float(), dim=-1)
+        return torch.round(normed * scale)
+
+    @torch.no_grad()
+    def encode_images(self, images: list, batch_size: int = 64) -> torch.Tensor:
+        all_embeds = []
+        for i in range(0, len(images), batch_size):
+            batch = images[i : i + batch_size]
+            inputs = self.processor(images=batch, return_tensors="pt").to(self.device)
+            out = self.model.get_image_features(**inputs)
+            embeds = out if isinstance(out, torch.Tensor) else out.pooler_output
+            quantized = self._quantize_int8(embeds)
+            all_embeds.append(F.normalize(quantized, dim=-1).cpu())
+        return torch.cat(all_embeds, dim=0)
+
+    @torch.no_grad()
+    def encode_texts(self, texts: list[str], batch_size: int = 64) -> torch.Tensor:
+        all_embeds = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            inputs = self.processor(
+                text=batch, return_tensors="pt", padding=True, truncation=True, max_length=77,
+            ).to(self.device)
+            out = self.model.get_text_features(**inputs)
+            embeds = out if isinstance(out, torch.Tensor) else out.pooler_output
+            quantized = self._quantize_int8(embeds)
+            all_embeds.append(F.normalize(quantized, dim=-1).cpu())
+        return torch.cat(all_embeds, dim=0)
+
+
 class QuipEmbedder(MultimodalEmbedder):
     """
     Trained QuipModel — evaluable at float, int8, or binary precision.
