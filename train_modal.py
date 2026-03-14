@@ -66,7 +66,7 @@ def download_data():
     image=image,
     gpu="A10",
     volumes={DATA_DIR: data_volume, OUTPUT_DIR: output_volume},
-    timeout=7200, # 2 hours should be enough for a few epochs, and we can always increase if needed
+    timeout=10800, # 3 hours should be enough for a few epochs, and we can always increase if needed
     secrets=[modal.Secret.from_name("comet-api-key")],
 )
 def train():
@@ -116,11 +116,11 @@ def train():
     training_args = QuipTrainingArguments(
         output_dir=os.path.join(OUTPUT_DIR, "quip-coco-run", run_name),
         run_name=run_name,
-        num_train_epochs=3,
-        per_device_train_batch_size=2048, # clip does better with larger batch sizes
-        learning_rate=2e-4,
+        num_train_epochs=10,
+        per_device_train_batch_size=4096, # clip does better with larger batch sizes
+        learning_rate=1e-4, # lower learning rate for a pre-trained backbone
         lr_scheduler_type="cosine",
-        warmup_ratio=0.05,
+        warmup_steps=100,
         # fp16=True,
         logging_steps=50,
         eval_strategy="steps",
@@ -130,7 +130,7 @@ def train():
         dataloader_num_workers=4,
         report_to=["comet_ml"],
         seed=SEED,
-        freeze_backbone_steps=200,
+        freeze_backbone_steps=600,
     )
 
     model = model.train()
@@ -144,6 +144,9 @@ def train():
     print("Starting training...")
     trainer.train()
     print("Training complete!")
+
+    # save final checkpoint to output volume
+    trainer.save_model(os.path.join(OUTPUT_DIR, "quip-coco-run", run_name, "final"))
 
     # Flush checkpoints to volume
     output_volume.commit()

@@ -225,7 +225,7 @@ class QuipModel(PreTrainedModel):
         with torch.no_grad():
             sim = image_norm @ text_norm.t()
             pos_sim = sim.diag().unsqueeze(1)  # [B, 1]
-            fn_mask = (sim - pos_sim).abs() < self.config.false_negative_margin
+            fn_mask = sim > (pos_sim + self.config.false_negative_margin)
             # Keep the diagonal (true positives)
             fn_mask.fill_diagonal_(False)
 

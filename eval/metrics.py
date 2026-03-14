@@ -49,10 +49,10 @@ def evaluate_retrieval(
     Run full retrieval eval: image->text and text->image Recall@{1,5,10}.
     """
     print(f"  Encoding {len(dataset.images)} images...")
-    image_embeds = embedder.encode_images(dataset.images, batch_size=batch_size)
+    image_embeds = embedder.encode_images(dataset.images, batch_size=batch_size, show_progress=True)
 
     print(f"  Encoding {len(dataset.texts)} texts...")
-    text_embeds = embedder.encode_texts(dataset.texts, batch_size=batch_size)
+    text_embeds = embedder.encode_texts(dataset.texts, batch_size=batch_size, show_progress=True)
 
     # [num_images, num_texts]
     scores = image_embeds @ text_embeds.t()

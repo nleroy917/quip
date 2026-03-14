@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 
 import torch
 import torch.nn.functional as F
+from tqdm import tqdm
 from transformers import AutoProcessor, CLIPModel
 
 from quip import QuipModel
@@ -21,14 +22,14 @@ class MultimodalEmbedder(ABC):
     name: str
 
     @abstractmethod
-    def encode_images(self, images: list, batch_size: int = 64) -> torch.Tensor:
+    def encode_images(self, images: list, batch_size: int = 64, show_progress: bool = False) -> torch.Tensor:
         """
         Encode a list of PIL images into normalized embeddings [N, D].
         """
         raise NotImplementedError
 
     @abstractmethod
-    def encode_texts(self, texts: list[str], batch_size: int = 64) -> torch.Tensor:
+    def encode_texts(self, texts: list[str], batch_size: int = 64, show_progress: bool = False) -> torch.Tensor:
         """
         Encode a list of strings into normalized embeddings [N, D].
         """
@@ -47,9 +48,10 @@ class CLIPEmbedder(MultimodalEmbedder):
         self.name = f"CLIP({model_name.split('/')[-1]})"
 
     @torch.no_grad()
-    def encode_images(self, images: list, batch_size: int = 64) -> torch.Tensor:
+    def encode_images(self, images: list, batch_size: int = 64, show_progress: bool = False) -> torch.Tensor:
         all_embeds = []
-        for i in range(0, len(images), batch_size):
+        offsets = range(0, len(images), batch_size)
+        for i in tqdm(offsets, desc=f"{self.name} images", disable=not show_progress):
             batch = images[i : i + batch_size]
             inputs = self.processor(images=batch, return_tensors="pt").to(self.device)
             out = self.model.get_image_features(**inputs)
@@ -58,9 +60,10 @@ class CLIPEmbedder(MultimodalEmbedder):
         return torch.cat(all_embeds, dim=0)
 
     @torch.no_grad()
-    def encode_texts(self, texts: list[str], batch_size: int = 64) -> torch.Tensor:
+    def encode_texts(self, texts: list[str], batch_size: int = 64, show_progress: bool = False) -> torch.Tensor:
         all_embeds = []
-        for i in range(0, len(texts), batch_size):
+        offsets = range(0, len(texts), batch_size)
+        for i in tqdm(offsets, desc=f"{self.name} texts", disable=not show_progress):
             batch = texts[i : i + batch_size]
             inputs = self.processor(
                 text=batch, return_tensors="pt", padding=True, truncation=True, max_length=77,
@@ -93,9 +96,10 @@ class CLIPQuantizedEmbedder(MultimodalEmbedder):
         return torch.round(normed * scale)
 
     @torch.no_grad()
-    def encode_images(self, images: list, batch_size: int = 64) -> torch.Tensor:
+    def encode_images(self, images: list, batch_size: int = 64, show_progress: bool = False) -> torch.Tensor:
         all_embeds = []
-        for i in range(0, len(images), batch_size):
+        offsets = range(0, len(images), batch_size)
+        for i in tqdm(offsets, desc=f"{self.name} images", disable=not show_progress):
             batch = images[i : i + batch_size]
             inputs = self.processor(images=batch, return_tensors="pt").to(self.device)
             out = self.model.get_image_features(**inputs)
@@ -105,9 +109,10 @@ class CLIPQuantizedEmbedder(MultimodalEmbedder):
         return torch.cat(all_embeds, dim=0)
 
     @torch.no_grad()
-    def encode_texts(self, texts: list[str], batch_size: int = 64) -> torch.Tensor:
+    def encode_texts(self, texts: list[str], batch_size: int = 64, show_progress: bool = False) -> torch.Tensor:
         all_embeds = []
-        for i in range(0, len(texts), batch_size):
+        offsets = range(0, len(texts), batch_size)
+        for i in tqdm(offsets, desc=f"{self.name} texts", disable=not show_progress):
             batch = texts[i : i + batch_size]
             inputs = self.processor(
                 text=batch, return_tensors="pt", padding=True, truncation=True, max_length=77,
@@ -116,6 +121,55 @@ class CLIPQuantizedEmbedder(MultimodalEmbedder):
             embeds = out if isinstance(out, torch.Tensor) else out.pooler_output
             quantized = self._quantize_int8(embeds)
             all_embeds.append(F.normalize(quantized, dim=-1).cpu())
+        return torch.cat(all_embeds, dim=0)
+
+
+class CLIPBinaryEmbedder(MultimodalEmbedder):
+    """
+    Vanilla CLIP with post-hoc binary quantization — the naive baseline.
+
+    Takes CLIP's L2-normalized float embeddings and binarizes them via sign().
+    This is the "just binarize after the fact" approach that Quip should beat.
+    """
+
+    def __init__(self, model_name: str, device: str = "cpu"):
+        self.model = CLIPModel.from_pretrained(model_name).to(device).eval()
+        self.processor = AutoProcessor.from_pretrained(model_name)
+        self.device = device
+        self.name = f"CLIP-binary({model_name.split('/')[-1]})"
+
+    @staticmethod
+    def _binarize(embeds: torch.Tensor) -> torch.Tensor:
+        """Post-hoc binary: normalize then sign."""
+        normed = F.normalize(embeds.float(), dim=-1)
+        return normed.sign()
+
+    @torch.no_grad()
+    def encode_images(self, images: list, batch_size: int = 64, show_progress: bool = False) -> torch.Tensor:
+        all_embeds = []
+        offsets = range(0, len(images), batch_size)
+        for i in tqdm(offsets, desc=f"{self.name} images", disable=not show_progress):
+            batch = images[i : i + batch_size]
+            inputs = self.processor(images=batch, return_tensors="pt").to(self.device)
+            out = self.model.get_image_features(**inputs)
+            embeds = out if isinstance(out, torch.Tensor) else out.pooler_output
+            binarized = self._binarize(embeds)
+            all_embeds.append(F.normalize(binarized, dim=-1).cpu())
+        return torch.cat(all_embeds, dim=0)
+
+    @torch.no_grad()
+    def encode_texts(self, texts: list[str], batch_size: int = 64, show_progress: bool = False) -> torch.Tensor:
+        all_embeds = []
+        offsets = range(0, len(texts), batch_size)
+        for i in tqdm(offsets, desc=f"{self.name} texts", disable=not show_progress):
+            batch = texts[i : i + batch_size]
+            inputs = self.processor(
+                text=batch, return_tensors="pt", padding=True, truncation=True, max_length=77,
+            ).to(self.device)
+            out = self.model.get_text_features(**inputs)
+            embeds = out if isinstance(out, torch.Tensor) else out.pooler_output
+            binarized = self._binarize(embeds)
+            all_embeds.append(F.normalize(binarized, dim=-1).cpu())
         return torch.cat(all_embeds, dim=0)
 
 
@@ -132,9 +186,10 @@ class QuipEmbedder(MultimodalEmbedder):
         self.name = f"Quip({quant_mode})"
 
     @torch.no_grad()
-    def encode_images(self, images: list, batch_size: int = 64) -> torch.Tensor:
+    def encode_images(self, images: list, batch_size: int = 64, show_progress: bool = False) -> torch.Tensor:
         all_embeds = []
-        for i in range(0, len(images), batch_size):
+        offsets = range(0, len(images), batch_size)
+        for i in tqdm(offsets, desc=f"{self.name} images", disable=not show_progress):
             batch = images[i : i + batch_size]
             inputs = self.processor(images=batch, return_tensors="pt").to(self.device)
             if self.quant_mode == "binary":
@@ -147,9 +202,10 @@ class QuipEmbedder(MultimodalEmbedder):
         return torch.cat(all_embeds, dim=0)
 
     @torch.no_grad()
-    def encode_texts(self, texts: list[str], batch_size: int = 64) -> torch.Tensor:
+    def encode_texts(self, texts: list[str], batch_size: int = 64, show_progress: bool = False) -> torch.Tensor:
         all_embeds = []
-        for i in range(0, len(texts), batch_size):
+        offsets = range(0, len(texts), batch_size)
+        for i in tqdm(offsets, desc=f"{self.name} texts", disable=not show_progress):
             batch = texts[i : i + batch_size]
             inputs = self.processor(
                 text=batch, return_tensors="pt", padding=True, truncation=True, max_length=77,

@@ -14,7 +14,6 @@ Usage:
     # Also evaluate on COCO
     modal run eval_modal.py --run-name <comet-run-name> --datasets flickr30k coco
 """
-from typing import List
 
 import modal
 
@@ -92,6 +91,7 @@ def evaluate(
     from eval import (
         CLIPEmbedder,
         CLIPQuantizedEmbedder,
+        CLIPBinaryEmbedder,
         QuipEmbedder,
         DATASET_LOADERS,
         evaluate_retrieval,
@@ -132,6 +132,7 @@ def evaluate(
     embedders = []
     embedders.append(CLIPEmbedder(clip_model, device=device)) # vanilla CLIP baseline
     embedders.append(CLIPQuantizedEmbedder(clip_model, device=device)) # post-hoc quantized CLIP baseline
+    embedders.append(CLIPBinaryEmbedder(clip_model, device=device)) # post-hoc binary quantized CLIP baseline
     processor = AutoProcessor.from_pretrained(clip_model)
     model = QuipModel.from_pretrained_clip(clip_model) # initialize with CLIP weights, then load trained checkpoint weights on top
 
@@ -164,7 +165,7 @@ def evaluate(
 def main(
     run_name=None,
     checkpoint_dir=None,
-    datasets=["flickr30k"],
+    datasets=["coco", "flickr30k"],
     quant_modes=["int8"],
     batch_size=256,
     clip_model="openai/clip-vit-base-patch32",
