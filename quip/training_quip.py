@@ -33,38 +33,22 @@ class QuipTrainer(Trainer):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._backbone_unfrozen = False
+        self._backbone_frozen = False
+        if self.args.freeze_backbone or self.args.freeze_backbone_steps > 0:
+            self._set_backbone_grad(False)
 
-    def _freeze_backbone(self):
+    def _set_backbone_grad(self, requires_grad: bool):
         for param in self.model.clip.parameters():
-            param.requires_grad = False
-
-    def _unfreeze_backbone(self):
-        for param in self.model.clip.parameters():
-            param.requires_grad = True
-        self._backbone_unfrozen = True
-
-    def create_optimizer(self):
-        """
-        Optionally freeze the CLIP backbone for warm-up.
-        """
-        args: QuipTrainingArguments = self.args
-        if args.freeze_backbone or args.freeze_backbone_steps > 0:
-            self._freeze_backbone()
-        return super().create_optimizer()
+            param.requires_grad = requires_grad
+        self._backbone_frozen = not requires_grad
 
     def training_step(self, model, inputs, num_items_in_batch=None):
-        """
-        Unfreeze backbone after the warm-up period if configured.
-        """
-        args: QuipTrainingArguments = self.args
         if (
-            args.freeze_backbone_steps > 0
-            and not self._backbone_unfrozen
-            and self.state.global_step >= args.freeze_backbone_steps
+            self._backbone_frozen
+            and self.args.freeze_backbone_steps > 0
+            and self.state.global_step >= self.args.freeze_backbone_steps
         ):
-            self._unfreeze_backbone()
-            # Rebuild optimizer to include backbone params
+            self._set_backbone_grad(True)
             self.create_optimizer()
 
         return super().training_step(model, inputs, num_items_in_batch=num_items_in_batch)
