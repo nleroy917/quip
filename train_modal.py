@@ -118,7 +118,7 @@ def train():
         run_name=run_name,
         num_train_epochs=10,
         per_device_train_batch_size=4096, # clip does better with larger batch sizes
-        learning_rate=1e-4, # lower learning rate for a pre-trained backbone
+        learning_rate=1e-4,               # lower learning rate for a pre-trained backbone
         lr_scheduler_type="cosine",
         warmup_steps=100,
         # fp16=True,
