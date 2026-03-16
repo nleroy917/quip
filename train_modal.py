@@ -117,7 +117,8 @@ def train():
         output_dir=os.path.join(OUTPUT_DIR, "quip-coco-run", run_name),
         run_name=run_name,
         num_train_epochs=10,
-        per_device_train_batch_size=4096, # clip does better with larger batch sizes
+        per_device_train_batch_size=128,
+        gradient_accumulation_steps=8, # effective batch size of 1024 (CLIP does best with large batches), adjust based on GPU memory
         learning_rate=1e-4,               # lower learning rate for a pre-trained backbone
         lr_scheduler_type="cosine",
         warmup_steps=100,
@@ -130,7 +131,7 @@ def train():
         dataloader_num_workers=4,
         report_to=["comet_ml"],
         seed=SEED,
-        freeze_backbone_steps=600,
+        freeze_backbone_steps=200, # freeze backbone for the first 100 steps, then unfreeze and train end-to-end
     )
 
     model = model.train()
